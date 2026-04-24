@@ -6,6 +6,12 @@
 
 > 🤖 **Automate Higgsfield, Freepik, Krea, Openart & more with AI coding agents:** [Generative-Media-Skills](https://github.com/SamurAIGPT/Generative-Media-Skills) — a library of skills that let agents like **Claude Code**, **Codex**, and other coding assistants drive 200+ image/video models end-to-end (prompt → generate → edit → stitch) directly from your terminal. Perfect for building automated media pipelines without touching a UI.
 
+### Related projects
+
+> **Open-source Weavy, Flora Fauna Freepik Spaces, Krea nodes alternative -> https://github.com/SamurAIGPT/Vibe-Workflow
+
+> **Open-source multi-modal chatbot and Poe alternative -> https://github.com/Anil-matcha/Open-Poe-AI 
+
 ## 🌐 Try it Online — No Install Required
 
 **Hosted version:** [https://dev.muapi.ai/open-generative-ai](https://dev.muapi.ai/open-generative-ai)
