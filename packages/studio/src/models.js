@@ -3846,7 +3846,7 @@ export const i2iModels = [
   {
     "id": "higgsfield-soul-image-to-image",
     "name": "Higgsfield Soul Image To Image",
-    "endpoint": "higgsfield-soul-image-to-image",
+    "endpoint": "hf-soul-image-to-image",
     "family": "higgsfield",
     "imageField": "image_url",
     "hasPrompt": true,
@@ -6586,7 +6586,7 @@ export const i2vModels = [
   {
     "id": "higgsfield-dop-image-to-video",
     "name": "Higgsfield Dop Image To Video",
-    "endpoint": "higgsfield-dop-image-to-video",
+    "endpoint": "hf-dop-image-to-video",
     "family": "higgsfield",
     "imageField": "image_url",
     "hasPrompt": true,
@@ -8237,6 +8237,7 @@ export const v2vModels = [
     "videoField": "video_url",
     "imageField": "image_url",
     "hasPrompt": true,
+    "promptRequired": true,
     "description": "Kling v2.6 Pro Motion Control allows precise control over camera movement, subject motion, and scene dynamics during video generation."
   },
   {

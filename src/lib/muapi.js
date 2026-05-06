@@ -407,10 +407,14 @@ export class MuapiClient {
     }
 
     /**
-     * Processes a video through a Video-to-Video model (e.g. watermark remover).
+     * Processes a video through a Video-to-Video model.
+     * Single-input tools (e.g. watermark remover) only need `video_url`.
+     * Motion-control models additionally need `image_url` and (often) `prompt`.
      * @param {Object} params
      * @param {string} params.model - v2vModel id
      * @param {string} params.video_url - The uploaded video URL
+     * @param {string} [params.image_url] - Reference image URL (motion-control models)
+     * @param {string} [params.prompt] - Motion description (motion-control models)
      */
     async processV2V(params) {
         const key = this.getKey();
@@ -420,6 +424,13 @@ export class MuapiClient {
 
         const videoField = modelInfo?.videoField || 'video_url';
         const finalPayload = { [videoField]: params.video_url };
+
+        if (modelInfo?.imageField && params.image_url) {
+            finalPayload[modelInfo.imageField] = params.image_url;
+        }
+        if (modelInfo?.hasPrompt && params.prompt) {
+            finalPayload.prompt = params.prompt;
+        }
 
         console.log('[Muapi] V2V Request:', url);
         console.log('[Muapi] V2V Payload:', finalPayload);

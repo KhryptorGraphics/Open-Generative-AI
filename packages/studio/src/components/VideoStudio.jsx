@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { generateVideo, generateI2V, uploadFile } from "../muapi.js";
+import { generateVideo, generateI2V, processV2V, uploadFile } from "../muapi.js";
 import {
   t2vModels,
   i2vModels,
@@ -144,7 +144,7 @@ function ModelDropdown({ imageMode, selectedModel, onSelect, onClose }) {
           </span>
           {isV2V && (
             <span className="text-[9px] text-orange-400/70">
-              Upload a video to use
+              {m.imageField ? "Upload a video and image" : "Upload a video to use"}
             </span>
           )}
         </div>
@@ -347,6 +347,15 @@ export default function VideoStudio({
   const getCurrentModel = useCallback(
     () => getCurrentModels().find((m) => m.id === selectedModel),
     [getCurrentModels, selectedModel],
+  );
+
+  const isMotionControlSelection = useCallback(
+    (modelId, isV2v) => {
+      if (!isV2v) return false;
+      const m = v2vModels.find((x) => x.id === modelId);
+      return !!m?.imageField;
+    },
+    [],
   );
 
   // ── update controls when model/mode changes ──────────────────────────────
@@ -635,23 +644,28 @@ export default function VideoStudio({
       });
       setUploadedImageUrl(url);
 
-      // Clear v2v if active
-      setUploadedVideoUrl(null);
-      setUploadedVideoName(null);
-      setV2vMode(false);
+      // Motion-control v2v: image is a second input, not a mode switch
+      if (isMotionControlSelection(selectedModel, v2vMode)) {
+        setPromptDisabled(false);
+      } else {
+        // Clear v2v if active
+        setUploadedVideoUrl(null);
+        setUploadedVideoName(null);
+        setV2vMode(false);
 
-      if (!imageMode) {
-        const currentT2V = t2vModels.find((m) => m.id === selectedModel);
-        const sibling = currentT2V?.family
-          ? i2vModels.find((m) => m.family === currentT2V.family)
-          : null;
-        const target = sibling || i2vModels[0];
-        setImageMode(true);
-        setSelectedModel(target.id);
-        setSelectedModelName(target.name);
-        applyControlsForModel(target.id, true, false);
+        if (!imageMode) {
+          const currentT2V = t2vModels.find((m) => m.id === selectedModel);
+          const sibling = currentT2V?.family
+            ? i2vModels.find((m) => m.family === currentT2V.family)
+            : null;
+          const target = sibling || i2vModels[0];
+          setImageMode(true);
+          setSelectedModel(target.id);
+          setSelectedModelName(target.name);
+          applyControlsForModel(target.id, true, false);
+        }
+        setPromptDisabled(false);
       }
-      setPromptDisabled(false);
     } catch (err) {
       console.error("[VideoStudio] Image upload failed:", err);
       alert(`Image upload failed: ${err.message}`);
@@ -665,6 +679,8 @@ export default function VideoStudio({
   const clearImageUpload = () => {
     setUploadedImageUrl(null);
     setUploadedEndImageUrl(null);
+    // Motion-control v2v: keep model and video; just drop the image
+    if (isMotionControlSelection(selectedModel, v2vMode)) return;
     setImageMode(false);
     const first = t2vModels[0];
     setSelectedModel(first.id);
@@ -716,18 +732,23 @@ export default function VideoStudio({
       setUploadedVideoUrl(url);
       setUploadedVideoName(file.name);
 
-      // Clear image mode if active
-      if (imageMode) {
-        setUploadedImageUrl(null);
-        setImageMode(false);
+      if (isMotionControlSelection(selectedModel, v2vMode)) {
+        // Already in motion-control mode — keep model and image, allow prompt
+        setPromptDisabled(false);
+      } else {
+        // Default v2v flow (e.g. watermark remover) — auto-pick the first v2v model
+        if (imageMode) {
+          setUploadedImageUrl(null);
+          setImageMode(false);
+        }
+        setV2vMode(true);
+        const firstV2V = v2vModels[0];
+        setSelectedModel(firstV2V.id);
+        setSelectedModelName(firstV2V.name);
+        applyControlsForModel(firstV2V.id, false, true);
+        setPrompt("");
+        setPromptDisabled(true);
       }
-      setV2vMode(true);
-      const firstV2V = v2vModels[0];
-      setSelectedModel(firstV2V.id);
-      setSelectedModelName(firstV2V.name);
-      applyControlsForModel(firstV2V.id, false, true);
-      setPrompt("");
-      setPromptDisabled(true);
     } catch (err) {
       console.error("[VideoStudio] Video upload failed:", err);
       alert(`Video upload failed: ${err.message}`);
@@ -755,13 +776,22 @@ export default function VideoStudio({
       if (isV2V) {
         setV2vMode(true);
         setImageMode(false);
-        setUploadedImageUrl(null);
-        setUploadedImagePreview(null);
+        const isMC = !!m.imageField;
+        if (!isMC) {
+          // Single-input v2v (watermark remover etc.) — drop any image
+          setUploadedImageUrl(null);
+          setUploadedImagePreview(null);
+        }
         setSelectedModel(m.id);
         setSelectedModelName(m.name);
         applyControlsForModel(m.id, false, true);
-        setPrompt("");
-        setPromptDisabled(true);
+        if (isMC) {
+          // Motion-control: prompt is editable, video+image are needed
+          setPromptDisabled(false);
+        } else {
+          setPrompt("");
+          setPromptDisabled(true);
+        }
       } else {
         if (v2vMode) {
           setV2vMode(false);
@@ -801,6 +831,14 @@ export default function VideoStudio({
         alert("Please upload a video first.");
         return;
       }
+      if (currentModel?.imageField && !uploadedImageUrl) {
+        alert("Please upload a reference image for motion control.");
+        return;
+      }
+      if (currentModel?.promptRequired && !trimmedPrompt) {
+        alert("Please describe the motion you want.");
+        return;
+      }
     } else if (isExtendMode) {
       if (!lastGenerationId) {
         alert(
@@ -829,11 +867,19 @@ export default function VideoStudio({
       let res;
 
       if (v2vMode) {
-        // V2V: use generateVideo with video_url (the v2v models use the video endpoint)
-        res = await generateVideo(apiKey, {
+        // V2V: dedicated processV2V handles single-input tools (e.g. watermark
+        // remover) and motion-control models (which take video + image + prompt)
+        const v2vParams = {
           model: selectedModel,
           video_url: uploadedVideoUrl,
-        });
+        };
+        if (currentModel?.imageField && uploadedImageUrl) {
+          v2vParams.image_url = uploadedImageUrl;
+        }
+        if (currentModel?.hasPrompt && trimmedPrompt) {
+          v2vParams.prompt = trimmedPrompt;
+        }
+        res = await processV2V(apiKey, v2vParams);
         if (!res?.url) throw new Error("No video URL returned by API");
 
         const genId = res.id || Date.now().toString();
@@ -842,7 +888,7 @@ export default function VideoStudio({
         const entry = {
           id: genId,
           url: res.url,
-          prompt: "",
+          prompt: currentModel?.hasPrompt ? trimmedPrompt : "",
           model: selectedModel,
           timestamp: new Date().toISOString(),
         };
@@ -852,7 +898,7 @@ export default function VideoStudio({
           onGenerationComplete({
             url: res.url,
             model: selectedModel,
-            prompt: "",
+            prompt: currentModel?.hasPrompt ? trimmedPrompt : "",
             type: "video",
           });
       } else if (imageMode) {
@@ -1021,7 +1067,11 @@ export default function VideoStudio({
   const isExtendMode = currentModelObj?.requiresRequestId;
 
   const promptPlaceholder = v2vMode
-    ? "Video ready — click Generate to remove watermark"
+    ? currentModelObj?.imageField
+      ? currentModelObj?.promptRequired
+        ? "Describe the motion"
+        : "Describe the motion (optional)"
+      : "Video ready — click Generate to remove watermark"
     : imageMode
       ? "Describe the motion or effect (optional)"
       : isExtendMode

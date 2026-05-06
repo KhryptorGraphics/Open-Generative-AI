@@ -68,6 +68,7 @@ export function VideoStudio() {
     };
     const getCurrentModes = (id) => getModesForModel(id);
     const getCurrentModel = () => getCurrentModels().find(m => m.id === selectedModel);
+    const isMotionControlV2V = () => v2vMode && !!getCurrentModel()?.imageField;
     const getQualitiesForModel = (id) => {
         const model = getCurrentModels().find(m => m.id === id);
         return model?.inputs?.quality?.enum || [];
@@ -122,6 +123,14 @@ export function VideoStudio() {
         anchorContainer: container,
         onSelect: ({ url }) => {
             uploadedImageUrl = url;
+            // Motion-control v2v: image is a second input alongside the video, not a mode switch
+            if (isMotionControlV2V()) {
+                textarea.disabled = false;
+                textarea.placeholder = uploadedVideoUrl
+                    ? (getCurrentModel()?.promptRequired ? 'Describe the motion' : 'Describe the motion (optional)')
+                    : 'Now upload a reference video using the 🎥 button';
+                return;
+            }
             // Clear video mode if active
             if (v2vMode) {
                 uploadedVideoUrl = null;
@@ -145,6 +154,8 @@ export function VideoStudio() {
         },
         onClear: () => {
             uploadedImageUrl = null;
+            // Motion-control v2v: keep the model selection; just lose the image
+            if (isMotionControlV2V()) return;
             imageMode = false;
             // Clearing the start frame invalidates any selected end frame.
             uploadedEndImageUrl = null;
@@ -258,8 +269,13 @@ export function VideoStudio() {
 
     const clearVideoUpload = () => {
         uploadedVideoUrl = null;
-        v2vMode = false;
         showVideoIcon();
+        // Motion-control v2v: keep the model and image; user can re-upload a video
+        if (isMotionControlV2V()) {
+            textarea.placeholder = 'Upload a reference video using the 🎥 button';
+            return;
+        }
+        v2vMode = false;
         selectedModel = allT2V[0].id;
         selectedModelName = allT2V[0].name;
         document.getElementById('v-model-btn-label').textContent = selectedModelName;
@@ -293,19 +309,27 @@ export function VideoStudio() {
             uploadedVideoUrl = url;
             showVideoReady(file.name);
 
-            // Switch to v2v mode
-            if (imageMode) {
-                picker.reset();
-                uploadedImageUrl = null;
-                imageMode = false;
+            // If a motion-control v2v model is already selected, keep it and the image upload
+            if (isMotionControlV2V()) {
+                textarea.disabled = false;
+                textarea.placeholder = uploadedImageUrl
+                    ? (getCurrentModel()?.promptRequired ? 'Describe the motion' : 'Describe the motion (optional)')
+                    : 'Now upload a reference image using the 🖼 button';
+            } else {
+                // Default v2v flow (e.g. watermark remover) — auto-pick the first v2v model
+                if (imageMode) {
+                    picker.reset();
+                    uploadedImageUrl = null;
+                    imageMode = false;
+                }
+                v2vMode = true;
+                selectedModel = v2vModels[0].id;
+                selectedModelName = v2vModels[0].name;
+                document.getElementById('v-model-btn-label').textContent = selectedModelName;
+                updateControlsForModel(selectedModel);
+                textarea.placeholder = 'Video ready — click Generate to remove watermark';
+                textarea.disabled = true;
             }
-            v2vMode = true;
-            selectedModel = v2vModels[0].id;
-            selectedModelName = v2vModels[0].name;
-            document.getElementById('v-model-btn-label').textContent = selectedModelName;
-            updateControlsForModel(selectedModel);
-            textarea.placeholder = 'Video ready — click Generate to remove watermark';
-            textarea.disabled = true;
         } catch (err) {
             console.error('[VideoStudio] Video upload failed:', err);
             showVideoIcon();
@@ -550,7 +574,7 @@ export function VideoStudio() {
                          <div class="w-10 h-10 ${iconColor} border border-white/5 rounded-xl flex items-center justify-center font-black text-sm shadow-inner uppercase">${m.name.charAt(0)}</div>
                          <div class="flex flex-col gap-0.5">
                             <span class="text-xs font-bold text-white tracking-tight">${m.name}</span>
-                            ${isV2V ? '<span class="text-[9px] text-orange-400/70">Upload a video to use</span>' : ''}
+                            ${isV2V ? `<span class="text-[9px] text-orange-400/70">${m.imageField ? 'Upload a video and image' : 'Upload a video to use'}</span>` : ''}
                          </div>
                     </div>
                     ${selectedModel === m.id ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d9ff00" stroke-width="4"><polyline points="20 6 9 17 4 12"/></svg>' : ''}
@@ -561,14 +585,25 @@ export function VideoStudio() {
                         // Switch to v2v mode
                         v2vMode = true;
                         imageMode = false;
-                        picker.reset();
-                        uploadedImageUrl = null;
+                        const isMC = !!m.imageField;
+                        if (!isMC) {
+                            // Single-input v2v (watermark remover etc.) — drop any image
+                            picker.reset();
+                            uploadedImageUrl = null;
+                        }
                         selectedModel = m.id;
                         selectedModelName = m.name;
                         document.getElementById('v-model-btn-label').textContent = selectedModelName;
                         updateControlsForModel(selectedModel);
-                        textarea.placeholder = 'Upload a video using the 🎥 button, then click Generate';
-                        textarea.disabled = true;
+                        if (isMC) {
+                            textarea.placeholder = m.promptRequired
+                                ? 'Upload a reference video and image, then describe the motion'
+                                : 'Upload a reference video and image, then describe the motion (optional)';
+                            textarea.disabled = false;
+                        } else {
+                            textarea.placeholder = 'Upload a video using the 🎥 button, then click Generate';
+                            textarea.disabled = true;
+                        }
                     } else {
                         // Leaving v2v mode if was in it
                         if (v2vMode) {
@@ -1054,6 +1089,14 @@ export function VideoStudio() {
                 alert('Please upload a video first.');
                 return;
             }
+            if (model?.imageField && !uploadedImageUrl) {
+                alert('Please upload a reference image for motion control.');
+                return;
+            }
+            if (model?.promptRequired && !prompt) {
+                alert('Please describe the motion you want.');
+                return;
+            }
         } else if (isExtendMode) {
             if (!lastGenerationId) {
                 alert('No Seedance 2.0 generation found to extend. Generate a video first.');
@@ -1132,14 +1175,17 @@ export function VideoStudio() {
             }
 
             if (v2vMode) {
-                const res = await muapi.processV2V({ model: selectedModel, video_url: uploadedVideoUrl, onRequestId });
+                const v2vParams = { model: selectedModel, video_url: uploadedVideoUrl, onRequestId };
+                if (model?.imageField && uploadedImageUrl) v2vParams.image_url = uploadedImageUrl;
+                if (model?.hasPrompt && prompt) v2vParams.prompt = prompt;
+                const res = await muapi.processV2V(v2vParams);
                 console.log('[VideoStudio] V2V response:', res);
                 if (res && res.url) {
                     if (capturedRequestId) removePendingJob(capturedRequestId);
                     const genId = res.id || capturedRequestId || Date.now().toString();
                     lastGenerationId = null;
                     lastGenerationModel = null;
-                    addToHistory({ id: genId, url: res.url, prompt: '', model: selectedModel, timestamp: new Date().toISOString() });
+                    addToHistory({ id: genId, url: res.url, prompt: model?.hasPrompt ? prompt : '', model: selectedModel, timestamp: new Date().toISOString() });
                     showVideoInCanvas(res.url, selectedModel);
                 } else {
                     throw new Error('No video URL returned by API');
